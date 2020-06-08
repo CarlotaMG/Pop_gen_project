@@ -1,0 +1,322 @@
+---
+title: "Pop_gen_project"
+author: "Charlie"
+date: "06/06/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(grid)
+library(gridExtra)
+```
+
+# Loading data
+```{r}
+archaic_df = read.table('C:/Users/carlo/Desktop/FAC/Population_Genomics/Project/ArchaicSegments.txt', sep='\t', header = T)
+
+head(archaic_df)
+```
+```{r}
+#filtering the segments with negative length
+archaic_df <- archaic_df %>% filter(length > 0)
+
+```
+
+# Average archaic segment length by population:
+```{r}
+mean_seg_pop <- archaic_df %>%
+        group_by(pop, region) %>%
+        summarise(`Mean segment length` = mean(length))
+  
+Pop_Archaic_proportion <- mean_seg_pop %>%
+  ungroup() %>%
+  arrange(region) %>% 
+  mutate(pop = factor(pop,pop)) %>%
+  ggplot(aes(x = pop, y = `Mean segment length`, fill = region)) + 
+        geom_bar(position = "dodge", stat="identity") + 
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+        coord_flip()
+
+Pop_Archaic_proportion
+
+tiff("Pop_Archaic_proportion.tiff", units="in", width=5, height=5, res=300)
+Pop_Archaic_proportion
+dev.off()
+```
+
+What can cause different mean fragment lengths?
+
+Differences in recombination rate, more than one wave of introgression in one of the regions. Recent gene flow/introgression from denisovans/neanderthal after migration out of Africa. Generation time.
+
+
+# What is the population with the highest average segment length?
+```{r}
+mean_seg_pop[which.max(mean_seg_pop$`Mean segment length`),]
+```
+
+```{r}
+# Average length of segments by region?
+mean_seg_region <- archaic_df %>%
+        group_by(region) %>%
+        summarise(`Mean segment length` = mean(length)) %>% head()
+
+ggplot(mean_seg_region, aes(x = region, y = `Mean segment length`)) +  geom_bar(position = "dodge", stat="identity") + theme_bw()
+```
+
+
+
+# Total lengths of Arcahic fragments in each individual
+
+```{r}
+
+# Total archaic segment length by ind and grouped by population and region:
+total_seg_ind <- archaic_df %>%
+        group_by(name, pop, region) %>%
+        summarise(`Total segment length` = sum(length))
+ 
+total_seg_ind %>%
+  ungroup() %>%
+  group_by(pop,region) %>%
+  summarise(`Mean total segment length`=mean(`Total segment length`)) %>%
+  ungroup() %>%
+  arrange(region) %>% 
+  mutate(pop = factor(pop, pop)) %>%
+  ggplot(aes(x = pop, y = `Mean total segment length`,
+        fill = region)) + 
+        geom_bar(position = "dodge", stat="identity") + 
+        theme_bw() +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Papuans contain not only regions from Neanderthal admixture (as all non africans), but also a high proportion of regions with Denisovan ancestry (longer segments; admixture after Neanderthal’s).
+
+Following the Cell paper method you can assign individuals fragments to archaic origin using the number of SNPs they share with Denisovans, Altai Neanderthal and Vindija Neanderthal. Let us make it simple and say that you assign a fragment to the archaic species that its shares most SNPs with. If there are equally many SNPs shared then share the fragment between the two individuals. If there are no SNPs shared with any of the archaics then consider the fragment unassigned.
+
+For each individual, the archaic segments are assign to origin and a Figure is reconstructed in the same style as Figure 5 of the Cell paper (plot below).
+
+```{r}
+# Spltting the data in 3 different pops
+Neanderthal <- archaic_df %>% 
+  filter(Shared_with_Altai > Shared_with_Denisova | 
+  Shared_with_Vindija > Shared_with_Denisova) %>%
+  mutate(closest_to = 'Neanderthal')
+
+Denisovan <- archaic_df %>% 
+  filter(Shared_with_Altai < 
+  Shared_with_Denisova & Shared_with_Vindija < 
+  Shared_with_Denisova) %>% mutate(closest_to = 'Denisovan')
+
+Unclassified <- archaic_df %>% 
+  filter(Shared_with_Altai + Shared_with_Vindija +
+  Shared_with_Denisova == 0)  %>%
+  mutate(closest_to = 'Unclassified') 
+
+# Plotting by population:
+plot_archaic_content <-  rbind(Neanderthal, Denisovan, Unclassified) %>%
+  
+  group_by(name, closest_to, pop) %>%
+  summarise(total = sum(length)) %>%
+  ungroup() %>%
+  group_by(pop, closest_to) %>%
+  summarise(mean_sequences = mean(total)) %>% 
+  ungroup() %>%
+  mutate(closest_to = factor(closest_to, c('Denisovan', 'Unclassified', 'Neanderthal'))) %>%
+  ggplot(aes(x = pop, y = mean_sequences/10^6, fill = closest_to)) +
+        geom_bar(stat="identity") + theme_bw() +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+        ylab('Mean detected archaic sequence per region (Mb)') + 
+coord_flip()
+
+plot_archaic_content  
+
+```
+# selecting the individuals used in the SNP's analysis with jaccard test
+```{r}
+
+individuals <- c('S_Turkish-2',
+ 'S_Bergamo-2',
+ 'S_Jordanian-3',
+ 'S_Yemenite_Jew-2',
+ 'S_French-2',
+ 'S_Yadava-2',
+ 'S_Makrani-1',
+ 'S_Punjabi-1',
+ 'S_Punjabi-2',
+ 'S_Yadava-1',
+ 'S_Even-1',
+ 'S_Yakut-1',
+ 'S_Mongola-2',
+ 'S_Eskimo_Sireniki-1',
+ 'S_Tubalar-1',
+ 'S_Kinh-1',
+ 'S_Dai-1',
+ 'ERS724854',
+ 'S_Japanese-1',
+ 'ERS724864',
+ 'TAR01',
+ 'TAR04',
+ 'TAR02',
+ '13784_1',
+ '13748_6',
+ 'UV927',
+ 'UV1230',
+ 'UV518',
+ 'UV043',
+ 'UV956',
+ 'S_Papuan-7',
+ 'S_Papuan-10',
+ 'S_Papuan-2',
+ 'S_Papuan-4',
+ 'S_Papuan-5')
+
+
+
+bindframe <- rbind(Neanderthal, Denisovan, Unclassified) 
+
+bindframe <- bindframe[bindframe$name %in% individuals,] 
+
+bindframe$name <- factor(bindframe$name, levels = individuals)
+
+archaic_content_samples <- bindframe %>%
+  group_by(name, closest_to, region) %>%
+  summarise(total = sum(length)) %>%
+  summarise(mean_sequences = mean(total)) %>% 
+  mutate(closest_to = factor(closest_to, c('Denisovan', 'Unclassified', 'Neanderthal'))) %>%
+  ggplot(aes(x = name, y = mean_sequences/10^6, fill = closest_to)) +
+        geom_bar(stat="identity") + theme_bw() +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+        ylab('Mean detected archaic sequence per region (Mb)') + 
+        coord_flip() + 
+        xlab('Individual') 
+
+  
+archaic_content_samples
+
+tiff("Samples_archaic_content.tiff", units="in", width=5, height=5, res=300)
+archaic_content_samples
+dev.off()
+
+```
+
+
+# Summarizing the results by averaging over region and plot these.
+```{r}
+
+# Plotting by region
+rbind(Neanderthal, Denisovan, Unclassified) %>%
+  group_by(name, closest_to, region) %>%
+  summarise(total = sum(length)) %>%
+  ungroup() %>%
+  group_by(region, closest_to) %>%
+  summarise(mean_sequences = mean(total)) %>% 
+  ungroup() %>%
+  mutate(closest_to = factor(closest_to, c('Denisovan', 'Unclassified', 'Neanderthal'))) %>%
+  ggplot(aes(x = region, y = mean_sequences/10^6, fill = closest_to)) +
+        geom_bar(stat="identity") + theme_bw() +
+        theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+        ylab('Mean detected archaic sequence per region (Mb)') + 
+coord_flip()
+```
+
+East Asians have been shown to contain more Neanderthal admixture (maybe because of a second admixture event after the European-East Asian split or maybe because of dilution of the Neanderthal component in the European population because of migrations from non-admixed populations). Additionally, it has been shown that East Asians contain higher admixture proportions of a different Denisovan origin, than South Asians and Papuans. The component most related to the Altai genome is the one present in a higher proportion in East Asians, compared to South Asians and Papuans. East Asians contain both components with similar proportions (two waves of admixture).
+
+# Determining the fragment length distribution of segment of Neanderthal and Denisova origin separately for each region. Comparing the mean of the distributions.
+```{r}
+dClass_Binned <- rbind(Neanderthal, Denisovan, Unclassified) %>%
+  mutate(total_snps = Shared_with_Altai + 
+                          Shared_with_Denisova +  
+                          Shared_with_Vindija) %>%
+  mutate(denisovan_ratio =  Shared_with_Denisova / total_snps,
+        neanderthal_ratio = (Shared_with_Vindija + Shared_with_Altai) / total_snps) %>%
+  filter(total_snps >= 20) %>%
+  group_by(name, pop, region)
+
+dClass_Binned %>%
+  ggplot() +
+  geom_density(aes(length, fill=closest_to),alpha=0.2) +
+  theme_bw() + facet_grid(~region) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) 
+```
+
+# Fragment lenght per region
+```{r}
+dClass_Binned %>% 
+      ggplot(aes(x=closest_to,y=length)) +
+      geom_boxplot() +
+      ggtitle('Denisovan fragment length per region') +
+      theme_bw() + facet_grid(~region) +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+      scale_x_discrete() 
+
+```
+
+# How does this compare to the fragment size distribution of the fragments that could not be assigned to archaic origin (these are removed from the Cell paper analyses). Discuss reasons for the differences.
+
+```{r}
+Neanderthal  %>%
+    group_by(region) %>%
+      ggplot(aes(length)) +
+      geom_vline(xintercept = median(Neanderthal$length), linetype="dashed") +
+      geom_histogram(bins = 50) +
+      ggtitle('Neanderthal fragment length per region') +
+      theme_bw() + facet_grid(~region) -> plot1
+
+Denisovan  %>%
+    group_by(region) %>%
+      ggplot(aes(length)) +
+      geom_vline(xintercept = median(Denisovan$length), linetype="dashed") +
+      geom_histogram(bins = 50) +
+      ggtitle('Denisovan fragment length per region') +
+      theme_bw() + facet_grid(~region) -> plot2
+
+Unclassified  %>%
+    group_by(region) %>%
+      ggplot(aes(length)) +
+      geom_vline(xintercept = median(Unclassified$length), linetype="dashed") +
+      geom_histogram(bins = 50) +
+      ggtitle('Unclassified fragment length per region') +
+      theme_bw() + facet_grid(~region) -> plot3
+
+grid.arrange(plot1, plot2, plot3)
+```
+
+East asia has a big peak of neatherthal segment length sugesting a more recent introgression event.
+Also has the biggest peak and range of non-identified archaic segments suggesting a more recent and more frequent introgression events.
+
+#Comparison of chromosomes
+
+#Investigate how the introgression events are distributed along the genome.
+
+#Determine the amount of archaic introgression on each chromosome for each of the five regions.
+```{r}
+rbind(Neanderthal, Denisovan, Unclassified) %>%
+group_by(chrom, region) %>%
+  summarise(Frequency = sum(as.numeric(length))) %>%
+  ggplot(aes(x = chrom, y = Frequency, fill = region)) +  
+        geom_bar(position = "dodge", stat="identity") +
+        theme_bw() +
+        scale_x_discrete(limits= c(seq(1, 22, 1),'X')) # ordering from 1 to 22
+```
+# Selection:
+# # Looking at the EPAS1, 
+```{r}
+
+
+# This gene maps to chr2:46,520,806-46,613,842 in GRCh37 coordinates.
+# Tibetan population have an increased amount of archaic polymorphism in this region. 
+
+Denisovan %>%
+filter(chrom == 2 & region == 'EastAsia' & start > 46500000 & end < 46700000 ) %>%
+ggplot((aes(x = length))) + theme_bw() +
+geom_histogram(bins = 50) + facet_grid(~country)
+```
+
